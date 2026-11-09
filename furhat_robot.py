@@ -12,6 +12,8 @@ from typing import Optional, Callable
 
 import numpy as np
 
+import robot_settings
+
 load_dotenv()
 
 class FurhatRobot:
@@ -66,6 +68,29 @@ class FurhatRobot:
         self.connected = True
         print(f"Connected to Furhat at {self.host}")
         time.sleep(1)
+        self.set_voice()
+        self.set_led_color()
+
+    def set_voice(self):
+        """Select the voice from robot_settings, so speech doesn't depend on what was last chosen on the robot."""
+        try:
+            status = self.client.request_voice_config(
+                name=robot_settings.VOICE_NAME,
+                language=robot_settings.VOICE_LANGUAGE,
+                gender=robot_settings.VOICE_GENDER,
+                provider=robot_settings.VOICE_PROVIDER,
+            )
+            print(f"Voice set: {status}")
+        except Exception as e:
+            print(f"Could not set voice {robot_settings.VOICE_NAME}: {e}")
+            
+    def set_led_color(self, color: str = robot_settings.LED_COLOR):
+        """Set the LED color on the robot."""
+        try:
+            status = self.client.request_led_set(color)
+            print(f"LED color set: {status}")
+        except Exception as e:
+            print(f"Could not set LED color {color}: {e}")
 
     def disconnect(self):
         """
@@ -108,19 +133,7 @@ class FurhatRobot:
         Simple helper: attend the user and ask a single question.
         """
         self.attend_user()
-        self.speak(question_text)
-
-    def comfort_and_ask_easy(self, comfort_text: str, easy_question_text: str):
-        """
-        Used when module detects nervousness (returns 'Yes').
-
-        The robot first says a comfort sentence, then asks an easier question.
-        """
-        self.attend_user()
-        # Comfort message
-        self.speak(comfort_text)
-        # Then ask the easy question
-        self.speak(easy_question_text)
+        self.speak(question_text)       
 
     async def connect_realtime(self):
         """
@@ -168,7 +181,8 @@ class FurhatRobot:
         msg.update(params)
         await self.ws.send(json.dumps(msg))
 
-        # -------------------- Camera control --------------------
+    # -------------------- Camera control --------------------
+    # This is from the code we based our demo on, but we currently do not use it.
 
     async def start_camera(self):
         """
@@ -195,7 +209,7 @@ class FurhatRobot:
             self.camera_running = False
             print("[Realtime] Camera stopped")
 
-        # -------------------- Audio control --------------------
+    # -------------------- Audio control --------------------
 
     async def start_audio(self, sample_rate: int = 16000):
         """
@@ -262,6 +276,7 @@ class FurhatRobot:
             await self._send_event("request.listen.stop")
             self.listening = False
             print("[Realtime] Listen stopped")
+                    
 
         # =====================================================================
         # Event loop: handle all incoming realtime events from Furhat

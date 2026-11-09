@@ -1,0 +1,12 @@
+furhat-realtime-api>=0.1.3
+websockets>=16.0
+openai>=3.0
+python-dotenv>=1.0
+pandas>=2.0
+openpyxl>=3.1
+scikit-learn>=1.5
+matplotlib>=3.8
+numpy>=2.0
+
+# Optional: only needed to decode camera frames (FurhatRobot.start_camera), I have not implemented this so it is useless atm
+# opencv-python>=4.8
