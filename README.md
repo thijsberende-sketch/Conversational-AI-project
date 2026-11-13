@@ -26,7 +26,8 @@ LED is set to forest green
 To change the stories, edit `sample_data.xlsx`. The `Title` column is what the robot guesses; every other column except `Author` is used for questions. Maybe later we add author again, but I removed it as it was splitting on that which felt useless as it is a almost unique value.
 
 ## Project structure
-`furhat_llm_demo.py` Main game loop: asking, listening, answer parsing, LLM question generation 
+`furhat_llm_demo.py` Main file, run this: general functions shared by the game modes (robot and LLM connection, asking, listening, answer parsing)
+`game_robot_asks.py` Game mode 1: Furhat asks yes/no questions to guess your story (decision tree walk, LLM question generation)
 `question_generator.py` Loads the data, builds the decision tree and describes its splits 
 `furhat_robot.py` Wrapper around the Furhat client and the Realtime API (speech, listening, camera, audio), also has the functions to change things about the robot
 `robot_settings.py` Face, voice, listening and LED settings
