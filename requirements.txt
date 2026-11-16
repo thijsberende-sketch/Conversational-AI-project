@@ -10,3 +10,6 @@ numpy>=2.0
 
 # Optional: only needed to decode camera frames (FurhatRobot.start_camera), I have not implemented this so it is useless atm
 # opencv-python>=4.8
+
+# Embedding model for answering questions from the table in game 2 (ONNX, no PyTorch needed)
+fastembed>=0.9

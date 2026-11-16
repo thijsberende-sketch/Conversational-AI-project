@@ -9,6 +9,7 @@ from openai import APIConnectionError, APIStatusError, OpenAI
 from furhat_robot import FurhatRobot
 
 import game_2 as g2
+import question_matcher as qm
 import robot_settings
 
 QUIT_WORDS = {"quit", "exit", "goodbye", "stop"}
@@ -152,7 +153,12 @@ async def play_round(robot: FurhatRobot, llm, model: str) -> bool:
         if wrong_title is not None:
             answer_text = f"No, it's not {wrong_title}."
         else:
-            answer = await answer_question(llm, model, book, user_text)
+            # Phase 1: answer from the table when possible (instant); phase 2: ask the LLM
+            answer = qm.table_answer(book, user_text)
+            if answer is not None:
+                print(f"Answered from the table: {answer}")
+            else:
+                answer = await answer_question(llm, model, book, user_text)
             answer_text = ANSWER_REPLIES[answer]
 
         if questions_asked >= MAX_QUESTIONS:
