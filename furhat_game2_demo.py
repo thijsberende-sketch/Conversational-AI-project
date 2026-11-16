@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import sys
 
 from dotenv import load_dotenv
 from openai import APIConnectionError, APIStatusError, OpenAI
@@ -19,7 +20,7 @@ LLM_PROVIDER = "openai"
 ANSWER_REPLIES = {
     "yes": "Yes.",
     "no": "No.",
-    "unknown": "I can't say that from what I know about the book.",
+    "unknown": "Sorry, I'm not sure. Could you ask that another way?",
 }
 
 
@@ -58,16 +59,38 @@ def create_llm() -> tuple[OpenAI, str]:
     raise ValueError(f"LLM_PROVIDER must be 'openai' or 'openrouter', not '{LLM_PROVIDER}'.")
 
 
-async def main() -> None:
+class ConsoleRobot:
+    """Stand-in for FurhatRobot when playing in the terminal: speaking prints, listening reads a typed line."""
+
+    on_final_text = None
+
+    def connect(self): pass
+    def disconnect(self): pass
+    def attend_user(self): pass
+    async def connect_realtime(self): pass
+    async def disconnect_realtime(self): pass
+    async def stop_listen(self): pass
+
+    def speak(self, text):
+        print(f"Furhat: {text}")
+
+    async def start_listen(self, **_):
+        try:
+            text = await asyncio.to_thread(input, "> ")
+        except EOFError:  # Ctrl+Z / Ctrl+D ends the game
+            text = "quit"
+        self.on_final_text(text)
+
+
+async def main(text_mode: bool = False) -> None:
     load_dotenv()
 
-    furhat_host = os.getenv("FURHAT_HOST")
-    if not furhat_host:
+    if not text_mode and not os.getenv("FURHAT_HOST"):
         raise ValueError("Set FURHAT_HOST to the IP address of your Furhat (or localhost for the virtual one).")
 
     llm, model = create_llm()
     print(f"Using {LLM_PROVIDER} model {model}")
-    robot = FurhatRobot()
+    robot = ConsoleRobot() if text_mode else FurhatRobot()
 
     robot.connect()
 
@@ -129,7 +152,8 @@ async def play_round(robot: FurhatRobot, llm, model: str) -> bool:
         if wrong_title is not None:
             answer_text = f"No, it's not {wrong_title}."
         else:
-            answer_text = ANSWER_REPLIES[await answer_question(llm, model, book, user_text)]
+            answer = await answer_question(llm, model, book, user_text)
+            answer_text = ANSWER_REPLIES[answer]
 
         if questions_asked >= MAX_QUESTIONS:
             await speak(robot, f"{answer_text} That was your last question. The book was {title}.")
@@ -394,5 +418,6 @@ if __name__ == "__main__":
     """
         Run the Furhat game 2 demo, connecting to the robot and the LLM provider specified in .env.
         It runs asynchronously, so the main function is wrapped in asyncio.run() to start the event loop.
+        Run with --text to play in the terminal without a robot: python furhat_game2_demo.py --text
     """
-    asyncio.run(main())
+    asyncio.run(main(text_mode="--text" in sys.argv))

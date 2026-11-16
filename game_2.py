@@ -36,36 +36,48 @@ def normalize(text):
     return re.sub(r"[^a-z0-9 ]", "", str(text).lower()).strip()
 
 
-def mentions_title(utterance, title):
-    """True if the sentence contains the title as whole words, e.g. 'Is it Dracula?'."""
-    return re.search(rf"\b{re.escape(normalize(title))}\b", normalize(utterance)) is not None
+TITLE_FILLER = {"the", "a", "an", "of", "for"}
 
- 
+
+def mentions_title(utterance, title):
+    """
+    True if the sentence names the title. Small words ("the", "a", "of", "for") may be left out and spaces
+    don't matter, so "Is it Yellow Wallpaper?" and "yellow wall paper" both match "The Yellow Wall-paper".
+    The remaining title words must all be said, in order.
+    """
+    words = [word for word in normalize(title).split() if word not in TITLE_FILLER]
+    pattern = ".*".join(re.escape(word) for word in words)
+    return bool(words) and re.search(pattern, normalize(utterance).replace(" ", "")) is not None
+
+
 def is_correct_guess(utterance, book):
-    """True if the player's sentence contains the secret title, e.g. 'Is it Dracula?'."""
-    return normalize(book[TARGET]) in normalize(utterance)
+    """True if the player's sentence names the secret title, e.g. 'Is it Yellow Wallpaper?'."""
+    return mentions_title(utterance, book[TARGET])
  
  
 def answer_prompt(book, question):
     """
-    Build the LLM prompt that answers a player's question using only the known facts.
+    Build the LLM prompt that answers a player's question about the secret book.
+    The LLM gets the title so it can use its own knowledge of the story; the known facts come first.
     This is the mirror image of split_prompt_for_node in game 1: there the LLM wrote the question,
     here it answers one.
     """
     facts = "\n".join(f"- {col}: {value}" for col, value in book_facts(book).items())
     return (
         "You are playing a yes/no guessing game. The player is trying to guess a book. "
-        "Use ONLY the facts below to answer the player's question.\n"
-        f"Facts about the secret book:\n{facts}\n\n"
+        f"The secret book is \"{book[TARGET]}\".\n"
+        f"Known facts about it:\n{facts}\n\n"
+        "Answer the player's question using these facts first, and your own knowledge of the book "
+        "for anything else.\n"
         f"Player's question: {question}\n\n"
-        "Answer with exactly one word: YES, NO or UNKNOWN (if the facts don't settle it). "
+        "Answer with exactly one word: YES or NO. If you are not sure, give the more likely answer. "
         "Never reveal the title."
     )
  
  
 def parse_answer(llm_output):
-    """Map raw LLM output to 'yes', 'no' or 'unknown'."""
-    match = re.search(r"\b(yes|no|unknown)\b", str(llm_output).lower())
+    """Map raw LLM output to 'yes' or 'no', or 'unknown' if it contains neither."""
+    match = re.search(r"\b(yes|no)\b", str(llm_output).lower())
     return match.group(1) if match else "unknown"
  
  
