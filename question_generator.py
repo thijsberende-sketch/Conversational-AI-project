@@ -8,7 +8,14 @@ from sklearn.tree import DecisionTreeClassifier
 import matplotlib.pyplot as plt
 
 # "na" marks an unknown value; reading it as missing avoids questions like "Is the main character na?"
-data = pandas.read_excel(Path(__file__).with_name('sample_data.xlsx'), na_values=['na'])
+data = pandas.read_excel(Path(__file__).with_name('Literary Works(1).xlsx'), na_values=['na'])
+
+# Columns holding a ";"-separated list, e.g. "Land; Gift". Each item becomes its own yes/no feature,
+# mapped to the wording used when asking about it ("Is land one of the symbols of the work?").
+MULTI_VALUE_COLUMNS = {"Symbols": "symbols", "Key Themes": "key themes"}
+
+# Items shared by fewer works are dropped: an item only one work has would be a giveaway question.
+MIN_ITEM_COUNT = 2
 
 
 def select_initial_guess():
@@ -41,13 +48,35 @@ def generate_decision_tree(max_depth=None):
     """
     target = 'Title'
     features = [col for col in data.columns if col != target and col != 'Author']
-    X = pandas.get_dummies(data[features])
+    X = build_features(features)
     y = data[target]
 
-    dtree = DecisionTreeClassifier(max_depth=max_depth)
+    dtree = DecisionTreeClassifier(criterion="entropy", max_features=0.25, max_depth=max_depth)
+
     dtree.fit(X, y)
 
     return dtree, X.columns.tolist(), target
+
+
+def build_features(features):
+    """
+    One-hot encode the single-value columns and multi-hot encode the list columns, so a list column like
+    Symbols gives one 0/1 feature per item ("Symbols_land") instead of one per full combination.
+    """
+    single = pandas.get_dummies(data[[col for col in features if col not in MULTI_VALUE_COLUMNS]])
+    parts = [single]
+    for column in MULTI_VALUE_COLUMNS:
+        if column not in features:
+            continue
+        # Lowercase and tidy the separators so "Indigenous Cultures" and "Indigenous cultures" are one item
+        items = (
+            data[column].fillna("").str.lower().str.strip()
+            .str.replace(r"\s*;\s*", ";", regex=True)
+            .str.get_dummies(sep=";")
+        )
+        items = items.loc[:, items.sum() >= MIN_ITEM_COUNT]
+        parts.append(items.add_prefix(column + "_"))
+    return pandas.concat(parts, axis=1)
 
 
 def describe_split(dtree, features, node_index):
@@ -60,6 +89,7 @@ def describe_split(dtree, features, node_index):
         category:      tested category for one-hot features, None for numeric ones
         limit:         numeric bound for numeric features (YES means value <= limit)
         yes_goes_left: whether a YES answer follows the left branch
+        multi:         whether the column is a list column, so YES means the category is one of its items
     """
     feature_index = dtree.tree_.feature[node_index]
     if feature_index < 0:
@@ -78,6 +108,7 @@ def describe_split(dtree, features, node_index):
             "category": None,
             "limit": limit,
             "yes_goes_left": True,
+            "multi": False,
         }
 
     column, _, category = feature_name.partition("_")
@@ -87,6 +118,7 @@ def describe_split(dtree, features, node_index):
         "category": category,
         "limit": None,
         "yes_goes_left": bool(1.0 <= threshold),
+        "multi": column in MULTI_VALUE_COLUMNS,
     }
 
 
@@ -102,7 +134,14 @@ def split_prompt_for_node(dtree, features, node_index):
     if split is None:
         return None
 
-    if split["category"] is not None:
+    if split["multi"]:
+        noun = MULTI_VALUE_COLUMNS[split["column"]]
+        split_description = (
+            f"The question must test whether '{split['category']}' is one of the {noun} of the work. "
+            f"A YES answer must mean '{split['category']}' is one of its {noun}. "
+            "Ask about this one item only."
+        )
+    elif split["category"] is not None:
         split_description = (
             f"The question must test whether {split['column']} = {split['category']}. "
             f"A YES answer must mean {split['column']} is {split['category']}."
@@ -128,6 +167,8 @@ def split_prompt_for_node(dtree, features, node_index):
 def fallback_question(split):
     """A plain template question, used when the LLM fails or returns an unusable question."""
     column = split["column"].rstrip("?")
+    if split["multi"]:
+        return f"Is {split['category']} one of the {MULTI_VALUE_COLUMNS[split['column']]} of the work?"
     if split["category"] is None:
         return f"Is the {column.lower()} {split['limit']:g} or lower?"
     if split["category"].lower() in {"yes", "no"}:

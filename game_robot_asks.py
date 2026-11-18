@@ -221,7 +221,8 @@ def prefetch_child_questions(
 def interpret_answer(user_text: str, split: dict, features: list[str]) -> bool | None:
     """Parse a yes/no answer, also accepting a category name, e.g. "Male" to "Is the author male?"."""
     answer = parse_yes_no(user_text)
-    if answer is not None or split["category"] is None:
+    # A work has several symbols/themes, so naming another one does not mean "no": only accept yes/no there
+    if answer is not None or split["category"] is None or split["multi"]:
         return answer
     if split["category"].lower() in {"yes", "no"}:
         return None
