@@ -243,9 +243,12 @@ class FurhatRobot:
 
         # -------------------- ASR (listen) control --------------------
 
-    async def start_listen(self, languages=None, phrases=None, end_speech_timeout: float = 2.0):
+    async def start_listen(self, languages=None, phrases=None, end_speech_timeout: float = 2.0, stop_no_speech: bool = True):
         """
         Start ASR listening (response.hear.* events).
+
+        stop_no_speech=True is Furhat's default: the robot stops listening by itself after about 8 s
+        without speech. Pass False to keep listening until the user speaks or stop_listen() is called.
         """
         if not self.realtime_connected:
             raise RuntimeError("Realtime not connected. Call connect_realtime() first.")
@@ -264,6 +267,7 @@ class FurhatRobot:
                 partial=True,
                 concat=True,
                 end_speech_timeout=float(end_speech_timeout),
+                stop_no_speech=stop_no_speech,
             )
             self.listening = True
             print(f"[Realtime] Listen started (languages={languages}, end_speech_timeout={end_speech_timeout})")

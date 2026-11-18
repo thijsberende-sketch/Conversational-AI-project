@@ -13,14 +13,17 @@ FACE_MICROEXPRESSIONS = None  # True / False
 
 # Speaking 
 # Applied on connect, so the robot always uses this voice instead of whatever was last selected on it.
-VOICE_NAME = "Amy-generative"
+VOICE_NAME = None
 VOICE_LANGUAGE = "en-GB"
 VOICE_GENDER = None
 VOICE_PROVIDER = None
 
 # Listening
 LISTEN_LANGUAGES = ["en-US"] # currently input is American, but output is British
-END_SPEECH_TIMEOUT = 2.0      # seconds of silence before the user's answer counts as finished, this could be changed to make it more natural, but it is not a big problem for this demo
+END_SPEECH_TIMEOUT = 2.0      # seconds of silence before the user's answer counts as finished (4 s felt too slow); in game 2 a finished question ends sooner, see QUESTION_END_SILENCE
+QUESTION_END_SILENCE = 1.0    # game 2: once what the user has said so far is a finished question, answer after this many seconds without new words (instead of END_SPEECH_TIMEOUT); 0.5 cut people off mid-sentence
+NO_QUESTION_TIMEOUT = 120.0   # game 2 fail-safe: if no question is heard for this many seconds, Furhat prompts the player again
+STOP_NO_SPEECH = False       # False: keep listening until the user speaks. True (Furhat default): the robot silently stops listening after ~8 s without speech
 
 # LED
 # Currently just set to green, sets this at default on connect, but the robot can change it during the conversation.
