@@ -11,7 +11,14 @@ A decision tree is trained on the stories in `sample_data.xlsx`. Each split in t
 - An OpenAI API key (the class key), or an [OpenRouter](https://openrouter.ai/keys) API key with `LLM_PROVIDER=openrouter` (free models are enough). See `.env.example` for all settings.
 
 
-The robot sets its voice and LED, then asks questions until it can guess the story. Answer with "yes" or "no" (or the value itself, such as "male"). Say "quit", "stop" or "goodbye" to end the game.
+The robot sets its voice and LED, welcomes you and explains the game, then asks questions. Answer with "yes" or "no" (or the value itself, such as "male"). Say "quit", "stop" or "goodbye" to end the game.
+
+How the robot guesses:
+- Once 3 or fewer works still fit your answers (`GUESS_THRESHOLD` in `game_robot_asks.py`), it guesses one. A wrong guess rules that work out and it asks more questions, skipping questions whose answer is already clear.
+- If no work in the data fits any more, either one of your answers didn't match the data or your work isn't in it. The LLM then gets all questions and answers, asks 3 extra questions (`EXTRA_LLM_QUESTIONS`) and makes one final guess. If that is wrong too, the robot gives up and asks what you were thinking of.
+- Once it knows your work (its final guess was right, or you told it), it checks your answers against the data and tells you which ones to double-check.
+- If the work was new, the LLM fills in its details (author, year, movement, themes, ...) and it is saved to `learned_works.csv`. That file is loaded together with the Excel file, so the robot can guess the work from the next round on. Delete a line (or the file) to forget learned works.
+- The year is asked as a century ("Was it written in the 19th century?"), since exact years are hard to know.
 
 ## Configuration
 
@@ -32,4 +39,5 @@ To change the stories, edit `sample_data.xlsx`. The `Title` column is what the r
 `furhat_robot.py` Wrapper around the Furhat client and the Realtime API (speech, listening, camera, audio), also has the functions to change things about the robot
 `robot_settings.py` Face, voice, listening and LED settings
 `sample_data.xlsx` The stories and their properties 
+`learned_works.csv` Works the robot learned from players (created after the first new work)
 `retrieve_data.py` and `Saving_answers.py` Currently not used, was meant for when Furhat is the one answering questions

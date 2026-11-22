@@ -1,5 +1,6 @@
 import math
 import random
+import re
 from pathlib import Path
 
 import pandas
@@ -7,12 +8,103 @@ from sklearn import tree
 from sklearn.tree import DecisionTreeClassifier
 import matplotlib.pyplot as plt
 
-# "na" marks an unknown value; reading it as missing avoids questions like "Is the main character na?"
-data = pandas.read_excel(Path(__file__).with_name('Literary Works(1).xlsx'), na_values=['na'])
+def year_to_century(year):
+    """
+    Turn a year (1845) or a period ("Early 20th century") into a century ("19th century").
+    Nobody knows the exact year a work was written, especially while still learning about it,
+    so the robot asks "Was it written in the 19th century?" instead of "Was it written in 1845?".
+    """
+    if pandas.isna(year):
+        return year
+    text = str(year).strip()
+    ordinal = re.search(r"(\d+)(?:st|nd|rd|th)", text)
+    if ordinal:
+        number = int(ordinal.group(1))
+    else:
+        try:
+            # float() also accepts "1845.0", which is how a year column with gaps is read from csv
+            number = int(float(text)) // 100 + 1
+        except ValueError:
+            return None
+    suffix = "th" if 11 <= number % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix} century"
+
+
+DATA_FILE = Path(__file__).with_name('Literary Works(1).xlsx')
+# Works the robot learned from players during games; kept apart so the curated Excel file is never changed
+LEARNED_FILE = Path(__file__).with_name('learned_works.csv')
 
 # Columns holding a ";"-separated list, e.g. "Land; Gift". Each item becomes its own yes/no feature,
 # mapped to the wording used when asking about it ("Is land one of the symbols of the work?").
 MULTI_VALUE_COLUMNS = {"Symbols": "symbols", "Key Themes": "key themes"}
+
+
+def prepare(raw):
+    """Turn the columns as stored in the files into the columns the game uses (Year becomes Century)."""
+    prepared = raw.copy()
+    prepared["Year"] = prepared["Year"].map(year_to_century)
+    return prepared.rename(columns={"Year": "Century"})
+
+
+# "na" marks an unknown value; reading it as missing avoids questions like "Is the main character na?"
+_raw = pandas.read_excel(DATA_FILE, na_values=['na'])
+RAW_COLUMNS = _raw.columns.tolist()
+if LEARNED_FILE.exists():
+    _raw = pandas.concat([_raw, pandas.read_csv(LEARNED_FILE, na_values=['na'])], ignore_index=True)
+data = prepare(_raw)
+
+
+def save_work(work):
+    """
+    Save a new work (a dict with the file columns, so Year instead of Century) to learned_works.csv,
+    and add it to the data so the next round's tree can already guess it.
+    """
+    global data
+    row = pandas.DataFrame([work], columns=RAW_COLUMNS)
+    row.to_csv(LEARNED_FILE, mode="a", header=not LEARNED_FILE.exists(), index=False)
+    data = pandas.concat([data, prepare(row)], ignore_index=True)
+
+
+def prepare_work(work):
+    """A work dict with the file columns, as a row with the game columns (like a row of data)."""
+    return prepare(pandas.DataFrame([work], columns=RAW_COLUMNS)).iloc[0]
+
+
+def work_row(title):
+    """The data row of a known title."""
+    return data.loc[data["Title"] == title].iloc[0]
+
+
+def find_title(text):
+    """The known title mentioned in a piece of text (the longest one if several match), or None."""
+    lowered = text.lower()
+    matches = [
+        title for title in data["Title"]
+        if re.search(rf"(?<!\w){re.escape(title.lower())}(?!\w)", lowered)
+    ]
+    return max(matches, key=len) if matches else None
+
+
+def work_has_feature(work, feature):
+    """
+    Whether a work (a data row) has a one-hot feature, e.g. "Century_19th century" or "Symbols_land".
+    Returns None when the value is unknown.
+    """
+    column, _, category = feature.partition("_")
+    value = work.get(column)
+    if value is None or pandas.isna(value):
+        return None
+    if column in MULTI_VALUE_COLUMNS:
+        return category in {item.strip().lower() for item in str(value).split(";")}
+    return str(value) == category
+
+
+def column_values(column):
+    """All values a column has in the data; list columns are split into their items."""
+    values = data[column].dropna().astype(str)
+    if column in MULTI_VALUE_COLUMNS:
+        values = values.str.split(";").explode().str.strip().str.lower()
+    return sorted(set(values) - {""})
 
 # Items shared by fewer works are dropped: an item only one work has would be a giveaway question.
 MIN_ITEM_COUNT = 2
@@ -171,9 +263,23 @@ def fallback_question(split):
         return f"Is {split['category']} one of the {MULTI_VALUE_COLUMNS[split['column']]} of the work?"
     if split["category"] is None:
         return f"Is the {column.lower()} {split['limit']:g} or lower?"
+    if split["column"] == "Century":
+        return f"Was it written in the {split['category']}?"
     if split["category"].lower() in {"yes", "no"}:
         return f"Would you answer {split['category'].lower()} to: {column.lower()}?"
     return f"Is the {column.lower()} {split['category']}?"
+
+
+def author_of(title):
+    """The author of a title in the data, or None if it is unknown."""
+    authors = data.loc[data["Title"] == title, "Author"].dropna()
+    return str(authors.iloc[0]) if not authors.empty else None
+
+
+def describe_work(title):
+    """A short spoken description of a title, e.g. "The Raven by Edgar Allen Poe"."""
+    author = author_of(title)
+    return f"{title} by {author}" if author else title
 
 
 def retrieve_decision_tree(dtree, features):

@@ -17,6 +17,12 @@ import robot_settings
 
 QUIT_WORDS = {"quit", "exit", "goodbye", "stop"}
 
+# OpenRouter models that refused a request with reasoning switched off, so later calls skip that attempt
+REASONING_REQUIRED: set[str] = set()
+
+# Set to the reason when the LLM can't be used for the rest of the session (daily free limit reached)
+llm_unavailable: str | None = None
+
 
 def create_llm() -> tuple[OpenAI, str]:
     """Create the LLM client for the provider chosen with LLM_PROVIDER in .env."""
@@ -40,11 +46,15 @@ def create_llm() -> tuple[OpenAI, str]:
             max_retries=0,
             timeout=30.0,
         )
-        model = os.getenv("OPENROUTER_MODEL", "openrouter/free")
-        if model != "openrouter/free" and not model.endswith(":free"):
+        # A comma-separated list means: use the first model, and fall back to the next ones when it is
+        # rate limited or down (free models often are)
+        model = ",".join(
+            name.strip() for name in os.getenv("OPENROUTER_MODEL", "openrouter/free").split(",") if name.strip()
+        )
+        if any(name != "openrouter/free" and not name.endswith(":free") for name in model.split(",")):
             raise ValueError(
                 "To keep requests free, OPENROUTER_MODEL must be 'openrouter/free' "
-                "or a model ID ending with ':free'."
+                "or model IDs ending with ':free'."
             )
         return llm, model
 
@@ -77,10 +87,11 @@ async def main() -> None:
         await robot.connect_realtime()
         robot.attend_user()
 
+        await game.welcome(robot)
         while await game.play_round(robot, llm, model):
             if await ask_yes_no(robot, "Do you want to play again?") is not True:
-                await speak(robot, "Thanks for playing. Goodbye!")
                 break
+        await game.farewell(robot)
     finally:
         await robot.stop_listen()
         await robot.disconnect_realtime()
@@ -155,51 +166,92 @@ async def llm_respond(
         {"role": "user", "content": message},
     ]
 
+    global llm_unavailable
+    if llm_unavailable:
+        # Fail at once, so the game uses its template questions instead of waiting on requests that will fail
+        raise RuntimeError(llm_unavailable)
+
     provider = llm_provider(llm)
-    for attempt in range(5):
+    token_budget = max_tokens
+    # Free OpenRouter models are reasoning models: thinking first takes 20+ seconds and can use up the
+    # whole token budget, so it is switched off. Some models refuse that; those get low effort instead.
+    reasoning = {"effort": "low"} if model in REASONING_REQUIRED else {"enabled": False}
+    empty_retried = False
+    # Few attempts on purpose: on the free tier every attempt, also a failed one, counts towards the daily limit
+    attempts = 3
+    for attempt in range(attempts):
+        last_attempt = attempt == attempts - 1
         try:
-            request_options = {"max_tokens": max_tokens}
+            request_options = {"max_tokens": token_budget}
             if response_format is not None:
                 request_options["response_format"] = response_format
-            # OpenRouter-only option; OpenAI rejects unknown request fields
-            if provider == "openrouter" and model != "openrouter/free":
-                request_options["extra_body"] = {
-                    "provider": {"sort": "throughput"}
-                }
+            # OpenRouter-only options; OpenAI rejects unknown request fields
+            models = model.split(",")
+            if provider == "openrouter":
+                extra_body = {"reasoning": reasoning}
+                if model != "openrouter/free":
+                    extra_body["provider"] = {"sort": "throughput"}
+                if len(models) > 1:
+                    # OpenRouter tries these in order when a model is rate limited or unavailable
+                    extra_body["models"] = models
+                request_options["extra_body"] = extra_body
 
             completion = await asyncio.to_thread(
                 llm.chat.completions.create,
-                model=model,
+                model=models[0],
                 messages=messages,
                 **request_options,
             )
-            if provider == "openrouter" and completion.model != model:
+            if provider == "openrouter" and completion.model != models[0]:
                 print(f"OpenRouter selected model: {completion.model}")
+
+            # A reasoning model can spend the whole budget thinking and return nothing: retry once with more room
+            reply = completion.choices[0].message.content if completion.choices else None
+            if not reply:
+                if empty_retried or last_attempt:
+                    raise RuntimeError("The LLM returned an empty reply.")
+                empty_retried = True
+                token_budget = min(token_budget * 4, 2048)
+                print(f"{provider} returned an empty reply; retrying once with max_tokens={token_budget}.")
+                continue
             break
         except APIStatusError as error:
-            if error.status_code not in {408, 429, 500, 502, 503, 504} or attempt == 4:
+            message_text = str(error).lower()
+            if error.status_code == 429 and "per-day" in message_text:
+                # The daily free limit is used up; every further request would fail too
+                llm_unavailable = (
+                    "The daily limit of free OpenRouter requests is used up, so the LLM is off for this session. "
+                    "It resets at midnight UTC; adding 10 credits on openrouter.ai raises it to 1000 per day."
+                )
+                print(llm_unavailable)
+                raise RuntimeError(llm_unavailable) from error
+            if (
+                error.status_code == 400
+                and "reasoning" in message_text
+                and reasoning.get("enabled") is False
+                and not last_attempt
+            ):
+                print(f"{model} cannot switch reasoning off; using low reasoning effort instead.")
+                REASONING_REQUIRED.add(model)
+                reasoning = {"effort": "low"}
+                continue
+            if error.status_code not in {408, 429, 500, 502, 503, 504} or last_attempt:
                 raise
             delay = 0.8 * (2**attempt)
             print(
                 f"{provider} returned HTTP {error.status_code}; "
-                f"retrying in {delay:.1f}s (attempt {attempt + 2}/5)."
+                f"retrying in {delay:.1f}s (attempt {attempt + 2}/{attempts})."
             )
             await asyncio.sleep(delay)
         except APIConnectionError:
-            if attempt == 4:
+            if last_attempt:
                 raise
             delay = 0.8 * (2**attempt)
             print(
                 f"{provider} connection failed; retrying in {delay:.1f}s "
-                f"(attempt {attempt + 2}/5)."
+                f"(attempt {attempt + 2}/{attempts})."
             )
             await asyncio.sleep(delay)
-
-    if not completion.choices:
-        raise RuntimeError("The LLM returned no choices.")
-    reply = completion.choices[0].message.content
-    if not reply:
-        raise RuntimeError("The LLM returned an empty reply.")
 
     print(f"Furhat: {reply}")
     return reply
