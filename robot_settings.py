@@ -20,8 +20,9 @@ VOICE_PROVIDER = None
 
 # Listening
 LISTEN_LANGUAGES = ["en-US"] # currently input is American, but output is British
-END_SPEECH_TIMEOUT = 2.0      # seconds of silence before the user's answer counts as finished (4 s felt too slow); in game 2 a finished question ends sooner, see QUESTION_END_SILENCE
+END_SPEECH_TIMEOUT = 4.0      # seconds of silence before the user's answer counts as finished; long so the player can pause mid-question ("is the author a... woman"). In game 2 a finished question ends sooner, see QUESTION_END_SILENCE
 QUESTION_END_SILENCE = 1.0    # game 2: once what the user has said so far is a finished question, answer after this many seconds without new words (instead of END_SPEECH_TIMEOUT); 0.5 cut people off mid-sentence
+FILLER_PAUSE = (0.3, 0.5)     # game 2: random pause (min, max seconds) between a thinking filler ("Hmm.") and the LLM's answer
 NO_QUESTION_TIMEOUT = 120.0   # game 2 fail-safe: if no question is heard for this many seconds, Furhat prompts the player again
 STOP_NO_SPEECH = False       # False: keep listening until the user speaks. True (Furhat default): the robot silently stops listening after ~8 s without speech
 

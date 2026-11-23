@@ -1,5 +1,6 @@
 import asyncio
 import os
+import random
 import re
 import sys
 from typing import Callable
@@ -33,11 +34,28 @@ UNFINISHED_ENDINGS = QUESTION_WORDS | FILLER_WORDS | {
 }
 MAX_QUESTIONS = 20 # We need to limit the number of questions, let's discuss this. 20 is a lot, but it allows for some mistakes and clarifications.
 
+# Furhat picks one of these at random, so the answers don't sound the same every time.
+# Keep them general: they have to fit any yes/no question.
 ANSWER_REPLIES = {
-    "yes": "Yes.",
-    "no": "No.",
-    "unknown": "Sorry, I'm not sure. Could you ask that another way?",
+    "yes": ["Yes.", "Yep.", "Yes, that's right.", "That's right.", "Correct.", "Yes, indeed."],
+    "no": ["No.", "Nope.", "No, sorry.", "I'm afraid not.", "No, I'm afraid not."],
+    "unknown": [
+        "Sorry, I'm not sure. Could you ask that another way?",
+        "Hmm, I can't really answer that. Could you rephrase it?",
+    ],
 }
+# Said while the LLM works on the answer (not for answers from the table, which are instant)
+THINKING_FILLERS = ["Hmm.", "Let me think.", "Hmm, let me think.", "Let me see.", "Good question."]
+
+_last_picked: dict[tuple[str, ...], str] = {}
+
+
+def pick(options: list[str]) -> str:
+    """A random option, never the same one twice in a row."""
+    key = tuple(options)
+    choices = [option for option in options if option != _last_picked.get(key)] or options
+    _last_picked[key] = random.choice(choices)
+    return _last_picked[key]
 
 
 def create_llm() -> tuple[OpenAI, str]:
@@ -183,8 +201,15 @@ async def play_round(robot: FurhatRobot, llm, model: str) -> bool:
             if answer is not None:
                 print(f"Answered from the table: {answer}")
             else:
-                answer = await answer_question(llm, model, book, user_text)
-            answer_text = ANSWER_REPLIES[answer]
+                # Start the LLM first and say a filler ("Hmm, let me think") while it works, so the
+                # filler covers the waiting time instead of adding to it
+                llm_task = asyncio.create_task(answer_question(llm, model, book, user_text))
+                await speak(robot, pick(THINKING_FILLERS))
+                # A short pause after the filler so "Hmm... Yes." doesn't come out as one phrase. It runs
+                # alongside the LLM, so a slow LLM doesn't get this pause added on top.
+                pause = random.uniform(*robot_settings.FILLER_PAUSE)
+                answer, _ = await asyncio.gather(llm_task, asyncio.sleep(pause))
+            answer_text = pick(ANSWER_REPLIES[answer])
 
         if questions_asked >= MAX_QUESTIONS:
             await speak(robot, f"{answer_text} That was your last question. The book was {title}.")
@@ -300,7 +325,8 @@ async def listen_until(
 async def ask_yes_no(robot: FurhatRobot, question: str, attempts: int = 3) -> bool | None:
     """Ask a yes/no question, re-asking on unclear answers. Quitting counts as no."""
     for _ in range(attempts):
-        user_text = await ask(robot, question)
+        # A clear yes, no or quit gets the quick reply; anything else waits the full END_SPEECH_TIMEOUT
+        user_text = await ask(robot, question, ends_turn_quickly=is_clear_yes_no)
         if user_text:
             print(f"You: {user_text}")
             if is_quit(user_text):
@@ -421,6 +447,11 @@ def ends_player_turn(user_text: str) -> bool:
         or is_give_up(user_text)
         or any(g2.mentions_title(user_text, title) for title in g2.data[g2.TARGET].dropna().unique())
     )
+
+
+def is_clear_yes_no(user_text: str) -> bool:
+    """True for a clear yes or no ("yes", "no thanks", "sure") or a quit word, used for the quick reply."""
+    return is_quit(user_text) or parse_yes_no(user_text) is not None
 
 
 def question_sounds_finished(user_text: str) -> bool:
