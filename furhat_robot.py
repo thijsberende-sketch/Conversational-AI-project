@@ -58,6 +58,10 @@ class FurhatRobot:
         self.on_audio: Optional[Callable[[bytes], None]] = None
         self.on_partial_text: Optional[Callable[[str], None]] = None
         self.on_final_text: Optional[Callable[[str], None]] = None
+        #   mic_and_speaker: (microphone PCM16 bytes, speaker PCM16 bytes) per audio chunk
+        #   event:   every realtime event except audio/camera data (raw dict)
+        self.on_mic_and_speaker_audio: Optional[Callable[[bytes, bytes], None]] = None
+        self.on_event: Optional[Callable[[dict], None]] = None
 
     def connect(self):
         """
@@ -211,13 +215,15 @@ class FurhatRobot:
 
     # -------------------- Audio control --------------------
 
-    async def start_audio(self, sample_rate: int = 16000):
+    async def start_audio(self, sample_rate: int = 16000, speaker: bool = False):
         """
         Start receiving raw microphone audio (response.audio.data).
 
         NOTE:
           - Audio data is PCM16 mono bytes in 'microphone' field.
           - Set self.on_audio to handle the data.
+          - With speaker=True the robot also sends what it says itself ('speaker' field);
+            set self.on_mic_and_speaker_audio to get both together.
         """
         if not self.realtime_connected:
             raise RuntimeError("Realtime not connected. Call connect_realtime() first.")
@@ -227,10 +233,10 @@ class FurhatRobot:
                 "request.audio.start",
                 sample_rate=sample_rate,
                 microphone=True,
-                speaker=False,
+                speaker=speaker,
             )
             self.audio_running = True
-            print(f"[Realtime] Audio started (mic, {sample_rate} Hz)")
+            print(f"[Realtime] Audio started ({'mic + speaker' if speaker else 'mic'}, {sample_rate} Hz)")
 
     async def stop_audio(self):
         """
@@ -300,6 +306,10 @@ class FurhatRobot:
                 event = json.loads(raw)
                 etype = event.get("type")
 
+                # Every event except the big data streams goes to on_event (used for session logging)
+                if self.on_event and etype not in ("response.audio.data", "response.camera.data"):
+                    self.on_event(event)
+
                 # -------------- Camera frames --------------
                 if etype == "response.camera.data":
                     image_b64 = event.get("image")
@@ -314,6 +324,12 @@ class FurhatRobot:
                     if mic_b64 and self.on_audio:
                         pcm = base64.b64decode(mic_b64)
                         self.on_audio(pcm)
+                    if self.on_mic_and_speaker_audio:
+                        speaker_b64 = event.get("speaker")
+                        self.on_mic_and_speaker_audio(
+                            base64.b64decode(mic_b64) if mic_b64 else b"",
+                            base64.b64decode(speaker_b64) if speaker_b64 else b"",
+                        )
 
                 # -------------- ASR partial text --------------
                 elif etype == "response.hear.partial":

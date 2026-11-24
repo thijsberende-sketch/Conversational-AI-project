@@ -13,7 +13,7 @@ FACE_MICROEXPRESSIONS = None  # True / False
 
 # Speaking 
 # Applied on connect, so the robot always uses this voice instead of whatever was last selected on it.
-VOICE_NAME = None
+VOICE_NAME = "Amy"
 VOICE_LANGUAGE = "en-GB"
 VOICE_GENDER = None
 VOICE_PROVIDER = None
@@ -21,10 +21,18 @@ VOICE_PROVIDER = None
 # Listening
 LISTEN_LANGUAGES = ["en-US"] # currently input is American, but output is British
 END_SPEECH_TIMEOUT = 4.0      # seconds of silence before the user's answer counts as finished; long so the player can pause mid-question ("is the author a... woman"). In game 2 a finished question ends sooner, see QUESTION_END_SILENCE
-QUESTION_END_SILENCE = 1.0    # game 2: once what the user has said so far is a finished question, answer after this many seconds without new words (instead of END_SPEECH_TIMEOUT); 0.5 cut people off mid-sentence
+QUESTION_END_SILENCE = 2.0    # game 2: once what the user has said so far is a finished question, answer after this many seconds without new words (instead of END_SPEECH_TIMEOUT); 0.5 and 1.0 cut people off mid-sentence
+STANDARD_REPLY_SILENCE = 1.0  # game 2: same, for short standard replies that can't be cut off halfway: quit, give up, a book title, yes/no to "play again?"
 FILLER_PAUSE = (0.3, 0.5)     # game 2: random pause (min, max seconds) between a thinking filler ("Hmm.") and the LLM's answer
 NO_QUESTION_TIMEOUT = 120.0   # game 2 fail-safe: if no question is heard for this many seconds, Furhat prompts the player again
 STOP_NO_SPEECH = False       # False: keep listening until the user speaks. True (Furhat default): the robot silently stops listening after ~8 s without speech
+
+# Recording (game 2)
+# Every game session is saved to its own folder in RECORDINGS_DIR: audio.wav (left = player, right = Furhat),
+# log.jsonl (all events with timestamps) and transcript.txt. The folder is in .gitignore, so it is never pushed.
+RECORD_SESSIONS = True
+RECORDINGS_DIR = "recordings"         # relative to the project folder
+RECORDING_SAMPLE_RATE = 16000
 
 # LED
 # Currently just set to green, sets this at default on connect, but the robot can change it during the conversation.
