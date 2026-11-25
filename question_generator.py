@@ -21,16 +21,17 @@ def year_to_century(year):
     if ordinal:
         number = int(ordinal.group(1))
     else:
-        try:
-            # float() also accepts "1845.0", which is how a year column with gaps is read from csv
-            number = int(float(text)) // 100 + 1
-        except ValueError:
+        # The first 3 or 4 digit number is the year, so "1845.0" (how csv reads a year column with gaps),
+        # "c. 1620" and "around 1818" (how the LLM sometimes gives a year) all work
+        year = re.search(r"\d{3,4}", text)
+        if not year:
             return None
+        number = int(year.group()) // 100 + 1
     suffix = "th" if 11 <= number % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
     return f"{number}{suffix} century"
 
 
-DATA_FILE = Path(__file__).with_name('Literary Works(1).xlsx')
+DATA_FILE = Path(__file__).with_name('Literary Works(2).xlsx')
 # Works the robot learned from players during games; kept apart so the curated Excel file is never changed
 LEARNED_FILE = Path(__file__).with_name('learned_works.csv')
 
@@ -75,13 +76,28 @@ def work_row(title):
     return data.loc[data["Title"] == title].iloc[0]
 
 
+def simplify_title(text, hyphen=""):
+    """Lowercase without punctuation, so speech recognition's "the yellow wallpaper" matches "The Yellow Wall-paper"."""
+    text = re.sub(r"['’]", "", str(text).lower()).replace("-", hyphen)
+    return " ".join(re.sub(r"[^\w\s]", " ", text).split())
+
+
 def find_title(text):
-    """The known title mentioned in a piece of text (the longest one if several match), or None."""
-    lowered = text.lower()
-    matches = [
-        title for title in data["Title"]
-        if re.search(rf"(?<!\w){re.escape(title.lower())}(?!\w)", lowered)
-    ]
+    """
+    The known title mentioned in a piece of text (the longest one if several match), or None.
+    The main title before a colon also counts, so "Walden" finds "Walden: 5. Solitude".
+    """
+    said = f" {simplify_title(text)} "
+    matches = []
+    for title in data["Title"]:
+        # A hyphen can be heard as one word or two: "wallpaper" or "wall paper"
+        names = {
+            simplify_title(name, hyphen)
+            for name in (title, str(title).split(":")[0])
+            for hyphen in ("", " ")
+        }
+        if any(name and f" {name} " in said for name in names):
+            matches.append(title)
     return max(matches, key=len) if matches else None
 
 

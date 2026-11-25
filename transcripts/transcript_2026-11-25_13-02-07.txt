@@ -1,0 +1,34 @@
+Furhat game transcript, 2026-11-25 13:02:07
+
+[13:02:07] Furhat: Hello, and welcome to the guessing game! You think of a literary work, like a poem, a short story or an essay, and I will try to guess it by asking you yes or no questions. If you are not sure about an answer, just give your best guess. You can say stop at any time to end the game.
+
+--- Round 1 ---
+[13:02:23] Furhat: Think of a literary work, and tell me when you're ready.
+[13:02:29] User: I'm ready
+[13:02:29] Furhat: Great, let's begin!
+[13:02:31] Furhat: Is it set in the 20th century?
+[13:02:37] User: no
+[13:02:37] Furhat: Is identity a key theme?
+[13:02:43] User: no
+[13:02:43] Furhat: Is it an essay?
+[13:02:47] User: no
+[13:02:47] Furhat: Is the author female?
+[13:02:57] User: (nothing heard)
+[13:02:57] Furhat: I didn't hear anything. Let me ask again.
+[13:03:00] Furhat: Is the author female?
+[13:03:04] User: no
+[13:03:04] Furhat: Is the main character male?
+[13:03:08] User: yes
+[13:03:08] Furhat: Is it a short story?
+[13:03:12] User: yes
+[13:03:12] Furhat: I think I know it! Is it The Open Boat by Stephen Crane?
+[13:03:19] User: no
+[13:03:19] Furhat: Hmm, then let me ask a bit more.
+[13:03:22] Furhat: Is the work set against Puritanism?
+[13:03:29] User: no
+[13:03:29] Furhat: Then it must be Bartleby the Scrivener by Herman Melville. Am I right?
+[13:03:36] User: yes
+[13:03:36] Furhat: Yes! I got it in 7 questions.
+[13:03:39] Furhat: Do you want to play again?
+[13:03:44] User: no
+[13:03:44] Furhat: Thank you for playing with me! I hope you enjoyed it, and maybe learned something about these works along the way. Goodbye!

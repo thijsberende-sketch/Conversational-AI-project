@@ -38,6 +38,11 @@ THINKING_FILLER_AFTER = 2.5
 QUESTION_WAIT = 8  # tree questions; afterwards the template question is used
 LLM_FALLBACK_WAIT = 15  # extra questions, final guess and looking up the player's work
 
+# Stop the round when nothing is heard this many times in a row (the player probably left), or when the
+# answer to one question stays unclear this many times
+MAX_SILENT_TRIES = 3
+MAX_UNCLEAR_TRIES = 5
+
 
 async def wait_for_llm(robot: FurhatRobot, awaitable, timeout: float, fallback):
     """Wait at most `timeout` seconds for an LLM request, saying "let me think" if it takes a moment."""
@@ -140,12 +145,7 @@ async def play_round(robot: FurhatRobot, llm, model: str) -> bool:
             # Guess once only a few works fit, instead of walking the whole tree
             if leaf or len(candidates) == 1 or (len(candidates) <= GUESS_THRESHOLD and may_guess):
                 title = random.choice(candidates)
-                if len(candidates) == 1 and rejected:
-                    guess = f"Then it must be {qg.describe_work(title)}. Am I right?"
-                elif not rejected:
-                    guess = f"I think I know it! Is it {qg.describe_work(title)}?"
-                else:
-                    guess = f"Is it {qg.describe_work(title)}?"
+                guess = guess_phrase(qg.describe_work(title), len(candidates), bool(rejected))
                 print(f"Guessing {title} out of {candidates}")
                 if await ask_until_answered(robot, guess):
                     plural = "" if questions_asked == 1 else "s"
@@ -179,8 +179,8 @@ async def play_round(robot: FurhatRobot, llm, model: str) -> bool:
         # No work in the data fits the answers: an answer was wrong, or the work is not in the data
         await guess_with_llm(robot, llm, model, history, rejected)
         return True
-    except QuitGame:
-        await speak(robot, "Okay, let's stop here.")
+    except QuitGame as stop:
+        await speak(robot, str(stop) or "Okay, let's stop here.")
         return False
     finally:
         tasks = set(pending.values())
@@ -188,6 +188,31 @@ async def play_round(robot: FurhatRobot, llm, model: str) -> bool:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def guess_phrase(description: str, candidates: int, guessed_wrong_before: bool) -> str:
+    """
+    How to word a guess, depending on how sure the robot is: only sound confident when a single work
+    still fits the answers; with two or three left it is really picking one of them.
+    """
+    if candidates == 1:
+        if guessed_wrong_before:
+            return f"Then it must be {description}. Am I right?"
+        return f"I think I know it! Is it {description}?"
+    if guessed_wrong_before:
+        return random.choice([
+            f"Hmm, then is it {description}?",
+            f"Okay, then maybe... is it {description}?",
+        ])
+    if candidates == 2:
+        return random.choice([
+            f"I'm not completely sure yet, but is it {description}?",
+            f"I think it's one of two works. Is it {description}?",
+        ])
+    return random.choice([
+        f"Let me take a guess. Is it {description}?",
+        f"I have a few ideas. Could it be {description}?",
+    ])
 
 
 async def ask_until_answered(
@@ -198,16 +223,22 @@ async def ask_until_answered(
 ) -> bool:
     """
     Ask until the user answers yes or no (or names the category, when a split is given).
-    Raises QuitGame when the user wants to stop.
+    Raises QuitGame when the user wants to stop, or when nobody seems to be there any more.
     """
+    silent = unclear = 0
     while True:
         user_text = await ask(robot, question)
-        if user_text is None:
-            await speak(robot, "I didn't hear anything. Let me ask again.")
-            continue
         if not user_text:
-            await speak(robot, "Sorry, I didn't catch that. Please try again.")
+            silent += 1
+            if silent >= MAX_SILENT_TRIES:
+                # Without this the robot would keep repeating the question to an empty room
+                raise QuitGame("I can't hear you any more, so let's stop for now.")
+            if user_text is None:
+                await speak(robot, "I didn't hear anything. Let me ask again.")
+            else:
+                await speak(robot, "Sorry, I didn't catch that. Please try again.")
             continue
+        silent = 0
         print(f"You: {user_text}")
         if is_quit(user_text):
             raise QuitGame
@@ -218,7 +249,13 @@ async def ask_until_answered(
             answer = parse_yes_no(user_text)
         if answer is not None:
             return answer
-        await speak(robot, "Please answer yes or no.")
+        unclear += 1
+        if unclear >= MAX_UNCLEAR_TRIES:
+            raise QuitGame("We seem to be stuck on this one, so let's stop for now.")
+        if unclear == 1:
+            await speak(robot, "Please answer yes or no.")
+        else:
+            await speak(robot, "If you're not sure, just give your best guess. Is it yes or no?")
 
 
 async def guess_with_llm(

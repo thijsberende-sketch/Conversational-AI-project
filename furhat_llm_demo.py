@@ -7,6 +7,8 @@ speaking, listening and parsing answers. The game modes live in their own files
 import asyncio
 import os
 import re
+from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import APIConnectionError, APIStatusError, OpenAI
@@ -15,13 +17,36 @@ from furhat_robot import FurhatRobot
 
 import robot_settings
 
-QUIT_WORDS = {"quit", "exit", "goodbye", "stop"}
+QUIT_WORDS = {"quit", "exit", "goodbye", "bye", "stop"}
 
 # OpenRouter models that refused a request with reasoning switched off, so later calls skip that attempt
 REASONING_REQUIRED: set[str] = set()
 
 # Set to the reason when the LLM can't be used for the rest of the session (daily free limit reached)
 llm_unavailable: str | None = None
+
+# Everything said during this session, saved to TRANSCRIPT_DIR when the game stops
+TRANSCRIPT_DIR = Path(__file__).parent / "transcripts"
+transcript: list[tuple[datetime, str, str]] = []  # (time, speaker, text)
+
+
+def log_turn(speaker: str, text: str) -> None:
+    transcript.append((datetime.now(), speaker, text))
+
+
+def save_transcript() -> Path | None:
+    """Write this session's conversation to a new file in TRANSCRIPT_DIR and return its path."""
+    if not transcript:
+        return None
+    TRANSCRIPT_DIR.mkdir(exist_ok=True)
+    started = transcript[0][0]
+    path = TRANSCRIPT_DIR / f"transcript_{started:%Y-%m-%d_%H-%M-%S}.txt"
+    lines = [f"Furhat game transcript, {started:%Y-%m-%d %H:%M:%S}", ""]
+    for time, speaker, text in transcript:
+        # An empty speaker marks a section heading, such as the start of a round
+        lines.append(f"[{time:%H:%M:%S}] {speaker}: {text}" if speaker else f"\n{text}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
 
 def create_llm() -> tuple[OpenAI, str]:
@@ -69,6 +94,9 @@ def llm_provider(llm: OpenAI) -> str:
 async def main() -> None:
     # Game modes import the general functions from this file, so they are imported here instead of at the top
     import game_robot_asks as game
+    # Run as a script, this file is loaded twice (as __main__ and as furhat_llm_demo, by the game);
+    # use the game's copy so the whole conversation ends up in one transcript
+    import furhat_llm_demo as shared
 
     load_dotenv()
 
@@ -88,17 +116,26 @@ async def main() -> None:
         robot.attend_user()
 
         await game.welcome(robot)
+        round_number = 1
+        shared.log_turn("", f"--- Round {round_number} ---")
         while await game.play_round(robot, llm, model):
-            if await ask_yes_no(robot, "Do you want to play again?") is not True:
+            if await shared.ask_yes_no(robot, "Do you want to play again?") is not True:
                 break
+            round_number += 1
+            shared.log_turn("", f"--- Round {round_number} ---")
         await game.farewell(robot)
     finally:
+        # Also runs when the game crashes or is stopped with Ctrl+C
+        saved = shared.save_transcript()
+        if saved:
+            print(f"Transcript saved to {saved}")
         await robot.stop_listen()
         await robot.disconnect_realtime()
         robot.disconnect()
 
 
 async def speak(robot: FurhatRobot, text: str) -> None:
+    log_turn("Furhat", text)
     # robot.speak blocks until speech is done; run it in a thread so the realtime event loop keeps running
     await asyncio.to_thread(robot.speak, text)
 
@@ -109,26 +146,61 @@ async def ask(
     time_to_wait: float = robot_settings.END_SPEECH_TIMEOUT,
 ) -> str | None:
     """Speak a question and return the user's answer, or None if nothing was heard."""
-    # Create a future to hold the user's answer
-    answer_future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+    loop = asyncio.get_running_loop()
+    # Holds the user's answer: the text, or None when the robot stopped listening without hearing anything
+    answer_future: asyncio.Future[str | None] = loop.create_future()
+    # Set when the robot refuses to listen, e.g. "Cannot start listening while already listening"
+    refused: asyncio.Future[str] = loop.create_future()
+    restarting = False
 
-    # callback function that handles eventual response from the user and sets the result of the future
-    def on_final_text(text: str) -> None:
+    def finish(text: str | None) -> None:
         if not answer_future.done():
-            answer_future.set_result(text.strip())
+            answer_future.set_result(text)
+
+    def on_final_text(text: str) -> None:
+        finish(text.strip())
+
+    def on_listen_end() -> None:
+        # The robot stopped listening. The final text can arrive just after this event, so wait a moment
+        # before counting it as silence. Ignored while we end an old listen session ourselves.
+        if not restarting:
+            loop.call_later(0.5, finish, None)
+
+    def on_error(message: str) -> None:
+        if "listen" in message.lower() and not refused.done():
+            refused.set_result(message)
 
     robot.on_final_text = on_final_text
+    robot.on_listen_end = on_listen_end
+    robot.on_error = on_error
     await speak(robot, question)
 
-    # custom timing can be added here to wait for the user to answer, would be cool to have a more natural timing,
-    # but this is not a big problem for this demo
-    await robot.start_listen(languages=robot_settings.LISTEN_LANGUAGES, end_speech_timeout=time_to_wait)
     try:
-        return await asyncio.wait_for(answer_future, timeout=60)
-    except asyncio.TimeoutError:
-        return None
+        for attempt in range(2):
+            await robot.start_listen(languages=robot_settings.LISTEN_LANGUAGES, end_speech_timeout=time_to_wait)
+            # Normally the robot ends listening by itself (after the answer, or after NO_SPEECH_TIMEOUT seconds
+            # of silence); LISTEN_TIMEOUT is only a safety net in case it sends nothing at all
+            await asyncio.wait(
+                {answer_future, refused},
+                timeout=robot_settings.LISTEN_TIMEOUT,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if answer_future.done() or not refused.done() or attempt == 1:
+                break
+            # The robot was still in an earlier listen session (e.g. from a previous run): end it, start again
+            print(f"The robot refused to listen ({refused.result()}); restarting listening.")
+            restarting = True
+            refused = loop.create_future()
+            await robot.stop_listen(force=True)
+            await asyncio.sleep(0.5)
+            restarting = False
+        answer = answer_future.result() if answer_future.done() else None
     finally:
+        robot.on_listen_end = None
+        robot.on_error = None
         await robot.stop_listen()
+    log_turn("User", answer or "(nothing heard)")
+    return answer
 
 
 async def ask_yes_no(robot: FurhatRobot, question: str, attempts: int = 3) -> bool | None:
@@ -276,8 +348,10 @@ def normalize(user_text: str) -> str:
 
 
 def is_quit(user_text: str) -> bool:
-    """Check if the user wants to quit the game."""
-    return normalize(user_text) in QUIT_WORDS
+    """Check if the user wants to quit the game: a quit word in a short answer, like "stop" or "I quit"."""
+    words = normalize(user_text).split()
+    # Short answers only, so a title like "Don't Stop Believing" or a longer sentence doesn't end the game
+    return 0 < len(words) <= 4 and any(word in QUIT_WORDS for word in words) and not {"don't", "not"} & set(words)
 
 
 def parse_yes_no(user_text: str) -> bool | None:
@@ -298,6 +372,10 @@ def parse_yes_no(user_text: str) -> bool | None:
         "cannot tell",
         "no clue",
         "who knows",
+        "yes and no",
+        "kind of",
+        "sort of",
+        "partly",
     )
     if any(answer == phrase or answer.startswith(phrase + " ") for phrase in unclear_prefixes):
         return None
@@ -328,7 +406,23 @@ def parse_yes_no(user_text: str) -> bool | None:
         "i believe so",
         "uh huh",
         "mm hmm",
-        "also yes"
+        "also yes",
+        "i guess so",
+        "probably",
+        "i think it is",
+        "i think it was",
+        "i believe it is",
+        "it does",
+        "it did",
+        "he is",
+        "she is",
+        "he was",
+        "she was",
+        "they were",
+        "i would say yes",
+        "i'd say yes",
+        "obviously",
+        "affirmative",
     )
     no_prefixes = (
         "no",
@@ -364,7 +458,32 @@ def parse_yes_no(user_text: str) -> bool | None:
         "i do not think so",
         "uh uh",
         "mm mm",
-        "also no"
+        "also no",
+        "yeah no",
+        "probably not",
+        "i guess not",
+        "i believe not",
+        "i don't believe so",
+        "not that i know of",
+        "it doesn't",
+        "it does not",
+        "it didn't",
+        "it did not",
+        "he isn't",
+        "he is not",
+        "she isn't",
+        "she is not",
+        "he wasn't",
+        "he was not",
+        "she wasn't",
+        "she was not",
+        "they weren't",
+        "they were not",
+        "i think it isn't",
+        "i think it is not",
+        "i would say no",
+        "i'd say no",
+        "never",
     )
 
     def longest_match(prefixes: tuple[str, ...]) -> int:

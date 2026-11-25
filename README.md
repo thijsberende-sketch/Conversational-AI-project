@@ -20,12 +20,14 @@ How the robot guesses:
 - If the work was new, the LLM fills in its details (author, year, movement, themes, ...) and it is saved to `learned_works.csv`. That file is loaded together with the Excel file, so the robot can guess the work from the next round on. Delete a line (or the file) to forget learned works.
 - The year is asked as a century ("Was it written in the 19th century?"), since exact years are hard to know.
 
+When the game stops (also after a crash or Ctrl+C), the whole conversation is saved with timestamps to `transcripts/transcript_<date>_<time>.txt`, one file per session.
+
 ## Configuration
 
 Initial robot behavior is currently set in [robot_settings.py](robot_settings.py), grouped like the tabs in the Furhat web interface:
 
 Face is currently not changed, it has the default mask and expressions
-Speaking is set to British English with the Amy voice
+Speaking is set to American English with the Danielle-Neural voice (the voice name and language must match, and "-generative" voices give no lip sync, so the mouth would not move)
 Listening settings are also left as default
 LED is set to forest green
 `None` means the robot keeps its own setting.
@@ -40,4 +42,5 @@ To change the stories, edit `sample_data.xlsx`. The `Title` column is what the r
 `robot_settings.py` Face, voice, listening and LED settings
 `sample_data.xlsx` The stories and their properties 
 `learned_works.csv` Works the robot learned from players (created after the first new work)
+`transcripts/` One transcript per session of everything Furhat and the player said
 `retrieve_data.py` and `Saving_answers.py` Currently not used, was meant for when Furhat is the one answering questions

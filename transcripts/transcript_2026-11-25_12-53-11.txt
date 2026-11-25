@@ -1,0 +1,43 @@
+Furhat game transcript, 2026-11-25 12:53:11
+
+[12:53:11] Furhat: Hello, and welcome to the guessing game! You think of a literary work, like a poem, a short story or an essay, and I will try to guess it by asking you yes or no questions. If you are not sure about an answer, just give your best guess. You can say stop at any time to end the game.
+
+--- Round 1 ---
+[12:53:27] Furhat: Think of a literary work, and tell me when you're ready.
+[12:53:34] User: I'm ready
+[12:53:34] Furhat: Great, let's begin!
+[12:53:35] Furhat: Is the main character male?
+[12:53:42] User: yes
+[12:53:42] Furhat: Is this an essay?
+[12:53:47] User: no
+[12:53:47] Furhat: Is the literary movement Romanticism?
+[12:53:50] User: (nothing heard)
+[12:53:50] Furhat: I didn't hear anything. Let me ask again.
+[12:53:53] Furhat: Is the literary movement Romanticism?
+[12:53:58] User: no
+[12:53:58] Furhat: Is this work a Slave Narrative?
+[12:54:04] User: no
+[12:54:04] Furhat: I think I know it! Is it Forgotten Coyote Stories by Vince Wannasay?
+[12:54:11] User: no
+[12:54:11] Furhat: Hmm, then let me ask a bit more.
+[12:54:14] Furhat: Is the setting at sea?
+[12:54:21] User: no
+[12:54:21] Furhat: Then it must be Powhatan's Discourse of Peace and War. Am I right?
+[12:54:28] User: no
+[12:54:28] Furhat: Hmm, none of the works I know fit your answers. Maybe one of the answers didn't match my notes, or it's a work I don't know yet. Let me ask a few more questions.
+[12:54:39] Furhat: Was it written before 1850?
+[12:54:45] User: no
+[12:54:46] Furhat: Is it a poem?
+[12:54:50] User: no
+[12:54:51] Furhat: Is the narrator male?
+[12:54:56] User: yes
+[12:54:57] Furhat: Okay, my final guess. Is it The Open Boat by Stephen Crane?
+[12:55:04] User: no
+[12:55:04] Furhat: I give up! What were you thinking of?
+[12:55:10] User: the swimmer
+[12:55:12] Furhat: Do you mean Rip van Winkle by Washington Irving?
+[12:55:18] User: no
+[12:55:18] Furhat: Hmm, then I don't know that one. Thanks for telling me anyway!
+[12:55:22] Furhat: Do you want to play again?
+[12:55:27] User: no
+[12:55:27] Furhat: Thank you for playing with me! I hope you enjoyed it, and maybe learned something about these works along the way. Goodbye!

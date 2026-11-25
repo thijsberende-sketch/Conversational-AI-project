@@ -58,6 +58,10 @@ class FurhatRobot:
         self.on_audio: Optional[Callable[[bytes], None]] = None
         self.on_partial_text: Optional[Callable[[str], None]] = None
         self.on_final_text: Optional[Callable[[str], None]] = None
+        #   listen_end: the robot stopped listening (also when it heard nothing)
+        #   error:      an error message from the robot, e.g. "Cannot start listening while already listening"
+        self.on_listen_end: Optional[Callable[[], None]] = None
+        self.on_error: Optional[Callable[[str], None]] = None
 
     def connect(self):
         """
@@ -82,7 +86,15 @@ class FurhatRobot:
             )
             print(f"Voice set: {status}")
         except Exception as e:
-            print(f"Could not set voice {robot_settings.VOICE_NAME}: {e}")
+            # A timeout has no message: the robot ignores a voice it doesn't have, e.g. a name with the wrong language
+            print(f"Could not set voice {robot_settings.VOICE_NAME} ({robot_settings.VOICE_LANGUAGE}): "
+                  f"{e or type(e).__name__}")
+            try:
+                voices = self.client.request_voice_status().get("voice_list") or []
+                matches = [v.get("voice_id") for v in voices if v.get("name") == robot_settings.VOICE_NAME]
+                print(f"Voices with that name on this robot: {matches or 'none'}")
+            except Exception:
+                pass
             
     def set_led_color(self, color: str = robot_settings.LED_COLOR):
         """Set the LED color on the robot."""
@@ -243,9 +255,16 @@ class FurhatRobot:
 
         # -------------------- ASR (listen) control --------------------
 
-    async def start_listen(self, languages=None, phrases=None, end_speech_timeout: float = 2.0):
+    async def start_listen(
+        self,
+        languages=None,
+        phrases=None,
+        end_speech_timeout: float = 2.0,
+        no_speech_timeout: float = robot_settings.NO_SPEECH_TIMEOUT,
+    ):
         """
-        Start ASR listening (response.hear.* events).
+        Start ASR listening (response.hear.* events). The robot stops by itself after the user's answer,
+        or after no_speech_timeout seconds of silence, and then sends response.listen.end.
         """
         if not self.realtime_connected:
             raise RuntimeError("Realtime not connected. Call connect_realtime() first.")
@@ -263,16 +282,21 @@ class FurhatRobot:
                 "request.listen.start",
                 partial=True,
                 concat=True,
+                stop_no_speech=True,
+                stop_user_end=True,
+                stop_robot_start=True,
+                no_speech_timeout=float(no_speech_timeout),
                 end_speech_timeout=float(end_speech_timeout),
             )
             self.listening = True
             print(f"[Realtime] Listen started (languages={languages}, end_speech_timeout={end_speech_timeout})")
 
-    async def stop_listen(self):
+    async def stop_listen(self, force: bool = False):
         """
-        Stop ASR listening.
+        Stop ASR listening. force also sends the stop when this program thinks it isn't listening,
+        e.g. to end a listen session the robot still has open from an earlier run.
         """
-        if self.listening:
+        if self.listening or force:
             await self._send_event("request.listen.stop")
             self.listening = False
             print("[Realtime] Listen stopped")
@@ -322,6 +346,21 @@ class FurhatRobot:
                     text = event.get("text", "")
                     if self.on_final_text:
                         self.on_final_text(text)
+
+                # -------------- Listening ended --------------
+                # Sent when the robot stops listening, also when it heard nothing; without handling this,
+                # the game would keep waiting for an answer that never comes
+                elif etype == "response.listen.end":
+                    self.listening = False
+                    if self.on_listen_end:
+                        self.on_listen_end()
+
+                # -------------- Errors --------------
+                elif etype == "error":
+                    message = str(event.get("message", ""))
+                    print(f"[Realtime] Robot error: {message}")
+                    if self.on_error:
+                        self.on_error(message)
 
                 # You can also handle other response.* types here if needed
 
